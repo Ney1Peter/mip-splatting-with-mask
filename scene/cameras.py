@@ -13,10 +13,12 @@ import torch
 from torch import nn
 import numpy as np
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix
+from torchvision.transforms import functional as F
 
 class Camera(nn.Module):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
                  image_name, uid,
+                 mask=None, # 新增参数，外部传入的mask
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda"
                  ):
         super(Camera, self).__init__()
@@ -39,6 +41,18 @@ class Camera(nn.Module):
         self.original_image = image.clamp(0.0, 1.0).to(self.data_device)
         self.image_width = self.original_image.shape[2]
         self.image_height = self.original_image.shape[1]
+
+        # ====================== 引入外部mask =============
+        if mask is not None:
+            # 默认 mask 是 PIL 且尺寸已对齐，并且是单通道
+            self.original_mask = F.to_tensor(mask).to(self.data_device)
+        else:
+            self.original_mask = torch.ones(
+                (1, self.image_height, self.image_width),
+                device=self.data_device
+            )
+
+        # ================================================
 
         if gt_alpha_mask is not None:
             self.original_image *= gt_alpha_mask.to(self.data_device)
