@@ -13,6 +13,7 @@ from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
+from PIL import Image as PILImage
 
 WARNED = False
 
@@ -46,10 +47,20 @@ def loadCam(args, id, cam_info, resolution_scale):
     if resized_image_rgb.shape[1] == 4:
         loaded_mask = resized_image_rgb[3:4, ...]
 
+    # =================== 新增 外部 mask 对齐 ===================
+    resized_external_mask = None
+    if hasattr(cam_info, "mask") and cam_info.mask is not None:
+        # cam_info.mask 是 PIL（灰度/单通道或RGB都行，这里转 L）
+        m = cam_info.mask.convert("L")
+
+        # 最近邻缩放，避免灰边
+        resized_external_mask = m.resize(resolution, resample=PILImage.NEAREST)
+    # ===================================================================
+
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=gt_image, gt_alpha_mask=loaded_mask,
-                  image_name=cam_info.image_name, uid=id, data_device=args.data_device)
+                  image_name=cam_info.image_name, uid=id, data_device=args.data_device, mask=resized_external_mask) # 新增：外部 mask 透传进 Camera
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []
