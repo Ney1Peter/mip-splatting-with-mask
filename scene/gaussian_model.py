@@ -59,6 +59,8 @@ class GaussianModel:
         self.setup_functions()
 
     def capture(self):
+        opt_state = self.optimizer.state_dict() if self.optimizer is not None else None
+
         return (
             self.active_sh_degree,
             self._xyz,
@@ -69,8 +71,11 @@ class GaussianModel:
             self._opacity,
             self.max_radii2D,
             self.xyz_gradient_accum,
+            self.xyz_gradient_accum_abs,        # add
+            self.xyz_gradient_accum_abs_max,    # add
             self.denom,
-            self.optimizer.state_dict(),
+            # self.optimizer.state_dict(),
+            opt_state,
             self.spatial_lr_scale,
         )
     
@@ -84,13 +89,20 @@ class GaussianModel:
         self._opacity,
         self.max_radii2D, 
         xyz_gradient_accum, 
+        xyz_gradient_accum_abs,
+        xyz_gradient_accum_abs_max,
         denom,
         opt_dict, 
         self.spatial_lr_scale) = model_args
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
+        self.xyz_gradient_accum_abs = xyz_gradient_accum_abs
+        self.xyz_gradient_accum_abs_max = xyz_gradient_accum_abs_max
         self.denom = denom
-        self.optimizer.load_state_dict(opt_dict)
+        # self.optimizer.load_state_dict(opt_dict)
+        if self.optimizer is not None and opt_dict is not None:
+            self.optimizer.load_state_dict(opt_dict)
+
 
     @property
     def get_scaling(self):
@@ -389,6 +401,11 @@ class GaussianModel:
         return optimizable_tensors
 
     def _prune_optimizer(self, mask):
+        # ======================== 安全检查 ========================
+        if self.optimizer is None:
+            return None
+        # =========================================================
+
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
             stored_state = self.optimizer.state.get(group['params'][0], None)
@@ -405,23 +422,92 @@ class GaussianModel:
                 group["params"][0] = nn.Parameter(group["params"][0][mask].requires_grad_(True))
                 optimizable_tensors[group["name"]] = group["params"][0]
         return optimizable_tensors
+    
 
+    # ======================== 剔除 mask =======================================================================
+    def prune_by_mask(self, valid_mask: torch.Tensor):
+        """保留 valid_mask 为 True 的 Gaussians，其余剔除"""
+
+        optimizable_tensors = self._prune_optimizer(valid_mask)
+
+        if optimizable_tensors is not None:
+            # 训练态：用 optimizer 裁剪后的 Parameter
+            self._xyz = optimizable_tensors["xyz"]
+            self._features_dc = optimizable_tensors["f_dc"]
+            self._features_rest = optimizable_tensors["f_rest"]
+            self._opacity = optimizable_tensors["opacity"]
+            self._scaling = optimizable_tensors["scaling"]
+            self._rotation = optimizable_tensors["rotation"]
+        else:
+            # 离线/纯推理：直接索引裁剪
+            # 如果之后还会训练，必须保留 Parameter 形态
+            self._xyz = nn.Parameter(self._xyz[valid_mask].requires_grad_(True))
+            self._features_dc = nn.Parameter(self._features_dc[valid_mask].requires_grad_(True))
+            self._features_rest = nn.Parameter(self._features_rest[valid_mask].requires_grad_(True))
+            self._opacity = nn.Parameter(self._opacity[valid_mask].requires_grad_(True))
+            self._scaling = nn.Parameter(self._scaling[valid_mask].requires_grad_(True))
+            self._rotation = nn.Parameter(self._rotation[valid_mask].requires_grad_(True))
+
+
+        # ====== filter_3D 也必须裁剪 ======
+        if hasattr(self, "filter_3D"):
+            self.filter_3D = self.filter_3D[valid_mask]
+
+        # ====== 训练统计量安全裁剪 ======
+        if hasattr(self, "xyz_gradient_accum") and self.xyz_gradient_accum.shape[0] > 0:
+            self.xyz_gradient_accum = self.xyz_gradient_accum[valid_mask]
+        if hasattr(self, "xyz_gradient_accum_abs") and self.xyz_gradient_accum_abs.shape[0] > 0:
+            self.xyz_gradient_accum_abs = self.xyz_gradient_accum_abs[valid_mask]
+        if hasattr(self, "xyz_gradient_accum_abs_max") and self.xyz_gradient_accum_abs_max.shape[0] > 0:
+            self.xyz_gradient_accum_abs_max = self.xyz_gradient_accum_abs_max[valid_mask]
+        if hasattr(self, "denom") and self.denom.shape[0] > 0:
+            self.denom = self.denom[valid_mask]
+        if hasattr(self, "max_radii2D") and self.max_radii2D.shape[0] > 0:
+            self.max_radii2D = self.max_radii2D[valid_mask]
+    # ==========================================================================================================
+
+
+    # ======================== 整个替换为 安全版 ===========================
     def prune_points(self, mask):
+        """
+        原语义：mask=True 的剔除
+        这里加安全逻辑，让训练/离线都行
+        """
         valid_points_mask = ~mask
         optimizable_tensors = self._prune_optimizer(valid_points_mask)
 
-        self._xyz = optimizable_tensors["xyz"]
-        self._features_dc = optimizable_tensors["f_dc"]
-        self._features_rest = optimizable_tensors["f_rest"]
-        self._opacity = optimizable_tensors["opacity"]
-        self._scaling = optimizable_tensors["scaling"]
-        self._rotation = optimizable_tensors["rotation"]
+        if optimizable_tensors is not None:
+            self._xyz = optimizable_tensors["xyz"]
+            self._features_dc = optimizable_tensors["f_dc"]
+            self._features_rest = optimizable_tensors["f_rest"]
+            self._opacity = optimizable_tensors["opacity"]
+            self._scaling = optimizable_tensors["scaling"]
+            self._rotation = optimizable_tensors["rotation"]
+        else:
+            self._xyz = nn.Parameter(self._xyz[valid_points_mask].requires_grad_(True))
+            self._features_dc = nn.Parameter(self._features_dc[valid_points_mask].requires_grad_(True))
+            self._features_rest = nn.Parameter(self._features_rest[valid_points_mask].requires_grad_(True))
+            self._opacity = nn.Parameter(self._opacity[valid_points_mask].requires_grad_(True))
+            self._scaling = nn.Parameter(self._scaling[valid_points_mask].requires_grad_(True))
+            self._rotation = nn.Parameter(self._rotation[valid_points_mask].requires_grad_(True))
 
-        self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
-        self.xyz_gradient_accum_abs = self.xyz_gradient_accum_abs[valid_points_mask]
-        self.xyz_gradient_accum_abs_max = self.xyz_gradient_accum_abs_max[valid_points_mask]
-        self.denom = self.denom[valid_points_mask]
-        self.max_radii2D = self.max_radii2D[valid_points_mask]
+
+        # filter_3D
+        if hasattr(self, "filter_3D"):
+            self.filter_3D = self.filter_3D[valid_points_mask]
+
+        # 训练统计量安全裁剪
+        if hasattr(self, "xyz_gradient_accum") and self.xyz_gradient_accum.shape[0] > 0:
+            self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
+        if hasattr(self, "xyz_gradient_accum_abs") and self.xyz_gradient_accum_abs.shape[0] > 0:
+            self.xyz_gradient_accum_abs = self.xyz_gradient_accum_abs[valid_points_mask]
+        if hasattr(self, "xyz_gradient_accum_abs_max") and self.xyz_gradient_accum_abs_max.shape[0] > 0:
+            self.xyz_gradient_accum_abs_max = self.xyz_gradient_accum_abs_max[valid_points_mask]
+        if hasattr(self, "denom") and self.denom.shape[0] > 0:
+            self.denom = self.denom[valid_points_mask]
+        if hasattr(self, "max_radii2D") and self.max_radii2D.shape[0] > 0:
+            self.max_radii2D = self.max_radii2D[valid_points_mask]
+
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
