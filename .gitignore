@@ -12,3 +12,10 @@ multi-scale
 benchmark*
 debug*
 fused
+lake/*
+statue/*
+utils/yolov8x-seg.pt
+*.pt
+*.pth
+*.bin
+*.onnx
