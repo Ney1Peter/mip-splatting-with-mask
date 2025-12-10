@@ -201,32 +201,36 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations,
             mask = create_offset_mask(mask, subpixel_offset)
             # ==========================================================================
 
-        # =================== 新增：mask 加权的 L1 / SSIM ===================
-        Ll1 = l1_loss(image * mask, gt_image * mask)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image * mask, gt_image * mask))
-        # ===============================================================
+        # =================== 修正：mask 仅用于 L1，SSIM 使用全图以避免边界伪影 ===================
+        # 归一化 L1 loss，避免 mask 区域过小导致梯度消失
+        Ll1 = l1_loss(image * mask, gt_image * mask) / (mask.mean() + 1e-6)
+
+        # SSIM 使用完整图像（不乘 mask），保持结构感知质量
+        ssim_val = ssim(image, gt_image)
+
+        loss = Ll1
+        # =====================================================================================
 
         loss.backward()
         iter_end.record()
 
         with torch.no_grad():
-            # =================== 新增：早期按 mask 剪掉背景 Gaussians ===================
-            # 和 A 改版一致：在一个较早的迭代点做一次 hard prune
+            # =================== 修正：早期按 mask 剪掉背景 Gaussians（正确 NDC → Pixel 映射）===================
             if iteration == 100 and hasattr(gaussians, "prune_by_mask"):
-                mask_2d = mask[0]  # [H,W]
-                H, W = mask_2d.shape[-2:]
+                mask_2d = mask[0]  # [H, W]
+                H, W = mask_2d.shape
 
-                # viewspace_points 在两版里通常是 N x 2 的归一化屏幕坐标(0~1)
-                proj = viewspace_point_tensor
-                if proj.dim() == 2 and proj.shape[1] >= 2:
-                    proj_x = (proj[:, 0] * W).long().clamp(0, W - 1)
-                    proj_y = (proj[:, 1] * H).long().clamp(0, H - 1)
+                proj_ndc = viewspace_point_tensor[:, :2]  # [N, 2], NDC coordinates in range [-1, 1]
+                if proj_ndc.shape[0] > 0:
+                    # Convert NDC [-1,1] to pixel coordinates [0, W) x [0, H)
+                    proj_x = ((proj_ndc[:, 0] + 1.0) * 0.5 * W).long().clamp(0, W - 1)
+                    proj_y = ((proj_ndc[:, 1] + 1.0) * 0.5 * H).long().clamp(0, H - 1)
                     keep = (mask_2d[proj_y, proj_x] > 0.5)
                     print(f"[Prune@100] Keeping {keep.sum().item()} / {keep.shape[0]} Gaussians by external mask")
                     gaussians.prune_by_mask(keep)
                 else:
-                    print("[Prune@100] Skip pruning: unexpected viewspace_points shape", proj.shape)
-            # =======================================================================
+                    print("[Prune@100] Skip pruning: no Gaussians to process")
+            # =================================================================================================
 
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
