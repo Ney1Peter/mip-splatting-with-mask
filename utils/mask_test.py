@@ -30,7 +30,7 @@ for img_path in sorted(image_paths):
 
     img = cv2.imread(str(img_path))
     if img is None:
-        print(f"  ⚠️ Failed to read image: {img_path}")
+        print(f"  Failed to read image: {img_path}")
         continue
 
     h, w = img.shape[:2]
@@ -62,4 +62,4 @@ for img_path in sorted(image_paths):
     status = "检测到真人 → 白色区域" if has_real_person else "无真人（可能为雕像）→ 全黑"
     print(f"  → {status}, saved to {mask_path}")
 
-print("✅ All images processed.")
+print("All images processed.")

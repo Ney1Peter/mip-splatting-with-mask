@@ -19,11 +19,11 @@ Supports: .mp4, .mov, .avi, .mkv, etc. via ffmpeg.
 """
 
 # ============================
-# ✨ ABSOLUTE PATHS (LOCKED) ✨
+#  ABSOLUTE PATHS (LOCKED) 
 # ============================
 DATASET_DIR = "/home/zheng/mip-splatting-with-mask/data/garden2_mobile"
 
-# 🔍 Auto-detect video file in DATASET_DIR
+# Auto-detect video file in DATASET_DIR
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm"}
 video_files = []
 for ext in VIDEO_EXTENSIONS:
@@ -46,7 +46,7 @@ if input_video is None:
     # Just pick the first one if no preference match
     input_video = sorted(video_files)[0]
 
-print(f"✅ Using video: {input_video}")
+print(f"Using video: {input_video}")
 
 INPUT_VIDEO = str(input_video)
 
@@ -185,7 +185,7 @@ def main():
         cv2.imwrite(str(std_mask), out_mask)
         cv2.imwrite(str(colmap_mask), out_mask)
 
-    print("✅ Done.")
+    print("Done.")
     print("Images :", OUTPUT_IMAGES_DIR)
     print("Masks  :", OUTPUT_MASKS_STD_DIR, " (e.g., 000001.png)")
     print("Mask   :", OUTPUT_MASK_COLMAP_DIR, " (e.g., 000001.png.png)")

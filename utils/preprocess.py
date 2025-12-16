@@ -22,7 +22,7 @@ All paths are ABSOLUTE and LOCKED.
 """
 
 # ============================
-# ✨ ABSOLUTE PATHS (LOCKED) ✨
+# ABSOLUTE PATHS (LOCKED)
 # ============================
 DATASET_DIR = "/home/zheng/mip-splatting-with-mask/data/garden3/"
 INPUT_MP4 = f"{DATASET_DIR}/garden3.mp4"

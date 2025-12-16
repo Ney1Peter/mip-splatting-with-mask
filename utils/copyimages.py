@@ -16,7 +16,7 @@ def main():
         print("Error: --start must be >= 1 and <= --end")
         sys.exit(1)
 
-    # 🔒 Locked paths
+    # Locked paths
     TEMPLATE_PATH = Path("/home/zheng/mip-splatting-with-mask/data/garden2_mobile/mask/000015.png.png")
     OUTPUT_DIR_1 = Path("/home/zheng/mip-splatting-with-mask/data/garden2_mobile/1")  # .png.png (COLMAP)
     OUTPUT_DIR_2 = Path("/home/zheng/mip-splatting-with-mask/data/garden2_mobile/2")  # .png (standard)
@@ -38,7 +38,7 @@ def main():
         shutil.copy2(TEMPLATE_PATH, dst1)
         shutil.copy2(TEMPLATE_PATH, dst2)
 
-    print("✅ Done!")
+    print("Done!")
     print(f" - COLMAP masks (double .png): {OUTPUT_DIR_1}")
     print(f" - Standard masks (single .png): {OUTPUT_DIR_2}")
 

@@ -18,7 +18,7 @@ def extract_number(filename: str) -> int:
 def rename_in_directory(dir_path: Path, start_index: int, is_double_suffix: bool = False):
     """重命名目录中的图片文件"""
     if not dir_path.exists():
-        print(f"⚠️  Directory not found, skipped: {dir_path}")
+        print(f"Directory not found, skipped: {dir_path}")
         return
 
     # 收集所有图片文件
@@ -35,14 +35,14 @@ def rename_in_directory(dir_path: Path, start_index: int, is_double_suffix: bool
                 files.append(f)
 
     if not files:
-        print(f"⚠️  No valid image files in {dir_path}, skipped.")
+        print(f"No valid image files in {dir_path}, skipped.")
         return
 
     # 按数字排序
     try:
         files.sort(key=lambda x: extract_number(x.name))
     except ValueError as e:
-        print(f"❌ Error sorting files in {dir_path}: {e}")
+        print(f"Error sorting files in {dir_path}: {e}")
         return
 
     print(f"Renaming {len(files)} files in {dir_path} starting from {start_index:06d}...")
@@ -64,7 +64,7 @@ def rename_in_directory(dir_path: Path, start_index: int, is_double_suffix: bool
     for temp_path, final_path in temp_files:
         temp_path.rename(final_path)
 
-    print(f"✅ Done: {dir_path}")
+    print(f"Done: {dir_path}")
 
 def main():
     parser = argparse.ArgumentParser(description="Rename image sequences in images/, masks/, mask/ directories.")
@@ -76,7 +76,7 @@ def main():
     start = args.start
 
     if not dataset.is_dir():
-        print(f"❌ Dataset directory not found: {dataset}")
+        print(f"Dataset directory not found: {dataset}")
         sys.exit(1)
 
     # 定义三个目录
@@ -91,7 +91,7 @@ def main():
     rename_in_directory(masks_std_dir, start, is_double_suffix=False)
     rename_in_directory(masks_colmap_dir, start, is_double_suffix=True)
 
-    print("\n🎉 All renaming completed!")
+    print("\n All renaming completed!")
 
 if __name__ == "__main__":
     main()
