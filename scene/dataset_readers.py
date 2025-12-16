@@ -35,7 +35,7 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
-    mask: Image.Image # 新增 PIL mask
+    mask: Image.Image = None
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -97,25 +97,25 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
             assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
 
         image_path = os.path.join(images_folder, os.path.basename(extr.name))
-        image_file = os.path.basename(image_path)                 # 含扩展名，用于 mask 对齐
         image_name = os.path.basename(image_path).split(".")[0]
         image = Image.open(image_path)
         # get rid of too many opened files
         image = copy.deepcopy(image)
-
-        # ======================= 新增每张 CameraInfo 读 PIL mask =======================
+        
+        # Load mask if masks folder exists
         mask_folder = os.path.join(os.path.dirname(images_folder), "masks")
-        mask_path = os.path.join(mask_folder, image_file)
-
-        if os.path.exists(mask_path):
-            mask = Image.open(mask_path)   # PIL, 尺寸默认已对齐
-        else:
-            # 全白 mask（255）= 不剔除
-            mask = Image.new('L', (width, height), 255)
-        # ===============================================================================
-
+        mask_path = os.path.join(mask_folder, os.path.basename(extr.name))
+        mask = None
+        if os.path.exists(mask_folder) and os.path.exists(mask_path):
+            try:
+                mask = Image.open(mask_path)
+                mask = copy.deepcopy(mask)
+            except Exception as e:
+                print(f"Warning: Could not load mask {mask_path}: {e}")
+                mask = None
+        
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                              image_path=image_path, image_name=image_name, width=width, height=height, mask=mask) # 新增传入 mask
+                              image_path=image_path, image_name=image_name, width=width, height=height, mask=mask)
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -161,57 +161,56 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
-    # ============================= 根据 mask 找无效3D点的 ID ============================
-    print("Filtering initial point cloud based on masks...")
-
-    # 1) 用“带扩展名的文件名”做 key，保证能和 extr.name 对上
-    mask_map = {os.path.basename(ci.image_path): ci.mask for ci in cam_infos}
-
+    # Filter point cloud based on masks if masks are available
+    mask_map = {ci.image_name: ci.mask for ci in cam_infos if ci.mask is not None}
     invalid_point3D_ids = set()
-    total_points_checked = 0
-    total_points_invalid = 0
-
-    for extr in cam_extrinsics.values():
-        image_file = os.path.basename(extr.name)  # extr.name 通常就是文件名(含扩展名)
-        if image_file not in mask_map:
-            continue
-
-        mask = mask_map[image_file]
-        mask_pixels = mask.load()
-        mask_width, mask_height = mask.size
-
-        for xy, point3D_id in zip(extr.xys, extr.point3D_ids):
-            if point3D_id == -1:
+    
+    if mask_map:
+        print("Filtering initial point cloud based on masks...")
+        total_points_checked = 0
+        total_points_invalid = 0
+        
+        for extr in cam_extrinsics.values():
+            image_name = os.path.basename(extr.name).split(".")[0]
+            if image_name not in mask_map:
                 continue
-
-            total_points_checked += 1
-            x, y = int(xy[0]), int(xy[1])
-
-            if 0 <= x < mask_width and 0 <= y < mask_height:
-                is_invalid = False
-                # 3x3 邻域检查
-                for dx in [-1, 0, 1]:
-                    for dy in [-1, 0, 1]:
-                        nx, ny = x + dx, y + dy
-                        if 0 <= nx < mask_width and 0 <= ny < mask_height:
-                            if mask_pixels[nx, ny] == 0:
-                                is_invalid = True
-                                break
+            
+            mask = mask_map[image_name]
+            mask_pixels = mask.load()
+            mask_width, mask_height = mask.size
+            
+            # Check each 3D point projection with 3x3 neighborhood
+            for xy, point3D_id in zip(extr.xys, extr.point3D_ids):
+                if point3D_id == -1:
+                    continue
+                
+                total_points_checked += 1
+                x, y = int(xy[0]), int(xy[1])
+                
+                # Check if point is within mask bounds
+                if 0 <= x < mask_width and 0 <= y < mask_height:
+                    # Check 3x3 neighborhood
+                    is_invalid = False
+                    for dx in [-1, 0, 1]:
+                        for dy in [-1, 0, 1]:
+                            nx, ny = x + dx, y + dy
+                            if 0 <= nx < mask_width and 0 <= ny < mask_height:
+                                if mask_pixels[nx, ny] == 0:  # Black pixel (object to remove)
+                                    is_invalid = True
+                                    break
+                        if is_invalid:
+                            break
+                    
                     if is_invalid:
-                        break
-
-                if is_invalid:
+                        invalid_point3D_ids.add(point3D_id)
+                        total_points_invalid += 1
+                else:
+                    # Out of bounds points are also invalid
                     invalid_point3D_ids.add(point3D_id)
                     total_points_invalid += 1
-            else:
-                invalid_point3D_ids.add(point3D_id)
-                total_points_invalid += 1
-
-    print(f"Found {len(invalid_point3D_ids)} 3D points to remove from initial cloud.")
-    print(f"Total points checked: {total_points_checked}, Invalid points: {total_points_invalid}")
-
-    # ===============================================================================
-
+        
+        print(f"Found {len(invalid_point3D_ids)} 3D points to remove from initial cloud.")
+        print(f"Total points checked: {total_points_checked}, Invalid points: {total_points_invalid}")
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
@@ -228,10 +227,17 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     if not os.path.exists(ply_path):
         print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
         try:
-            xyz, rgb, *_ = read_points3D_binary(bin_path)
+            xyz, rgb, _, point3D_ids = read_points3D_binary(bin_path)
         except:
-            xyz, rgb, *_ = read_points3D_text(txt_path)
-
+            xyz, rgb, _, point3D_ids = read_points3D_text(txt_path)
+        
+        # Filter out invalid points if we have mask-based filtering
+        if invalid_point3D_ids:
+            valid_mask = np.array([pid not in invalid_point3D_ids for pid in point3D_ids])
+            xyz = xyz[valid_mask]
+            rgb = rgb[valid_mask]
+            print(f"Filtered point cloud: kept {len(xyz)} points out of {len(point3D_ids)} original points")
+        
         storePly(ply_path, xyz, rgb)
     try:
         pcd = fetchPly(ply_path)
@@ -282,8 +288,20 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             FovY = fovy 
             FovX = fovx
 
+            # Load mask if masks folder exists
+            mask_folder = os.path.join(path, "masks")
+            mask_path = os.path.join(mask_folder, frame["file_path"] + extension)
+            mask = None
+            if os.path.exists(mask_folder) and os.path.exists(mask_path):
+                try:
+                    mask = Image.open(mask_path)
+                    mask = copy.deepcopy(mask)
+                except Exception as e:
+                    print(f"Warning: Could not load mask {mask_path}: {e}")
+                    mask = None
+
             cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
+                            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1], mask=mask))
             
     return cam_infos
 
@@ -364,8 +382,20 @@ def readMultiScale(path, white_background,split, only_highres=False):
         FovY = fovy 
         FovX = fovx
 
+        # Load mask if masks folder exists
+        mask_folder = os.path.join(path, "masks")
+        mask_path = os.path.join(mask_folder, relative_path)
+        mask = None
+        if os.path.exists(mask_folder) and os.path.exists(mask_path):
+            try:
+                mask = Image.open(mask_path)
+                mask = copy.deepcopy(mask)
+            except Exception as e:
+                print(f"Warning: Could not load mask {mask_path}: {e}")
+                mask = None
+
         cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                        image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
+                        image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1], mask=mask))
     return cam_infos
 
 
@@ -409,4 +439,6 @@ def readMultiScaleNerfSyntheticInfo(path, white_background, eval, load_allres=Fa
 
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
+    "Blender" : readNerfSyntheticInfo,
+    "Multi-scale": readMultiScaleNerfSyntheticInfo,
 }

@@ -12,6 +12,7 @@
 import os
 import random
 import json
+import torch
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.gaussian_model import GaussianModel
@@ -83,7 +84,11 @@ class Scene:
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+            # Get device from args if available, otherwise use cuda
+            # Note: For rendering, we need CUDA due to rasterization requirements
+            data_device = getattr(args, 'data_device', 'cuda')
+            render_device = 'cuda' if torch.cuda.is_available() else data_device
+            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent, render_device)
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
