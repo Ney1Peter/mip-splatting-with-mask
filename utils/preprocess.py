@@ -24,12 +24,12 @@ All paths are ABSOLUTE and LOCKED.
 # ============================
 # ✨ ABSOLUTE PATHS (LOCKED) ✨
 # ============================
-DATASET_DIR = "/home/zheng/mip-splatting-with-mask/round"
-INPUT_MP4 = f"{DATASET_DIR}/round.mp4"
+DATASET_DIR = "/home/zheng/mip-splatting-with-mask/data/garden3/"
+INPUT_MP4 = f"{DATASET_DIR}/garden3.mp4"
 OUTPUT_IMAGES_DIR = f"{DATASET_DIR}/pre-images"
 OUTPUT_MASKS_DIR = f"{DATASET_DIR}/pre-masks"
 
-CUBIC_VIDEO = f"{DATASET_DIR}/round_cubic.mp4"
+CUBIC_VIDEO = f"{DATASET_DIR}/garden3_cubic.mp4"
 
 FACE_VIDEOS = {
     "front": f"{DATASET_DIR}/front.mp4",
